@@ -707,15 +707,16 @@ class Client implements SmppClientInterface
                 );
             } elseif ($this->config->getCsmsMethod() === Smpp::CSMS_8BIT_UDH && isset($parts)) {
                 $sequenceNumber = 1;
-                $csmsReference = (string) $this->getCsmsReference();
+                $csmsReference = substr((string) $this->getCsmsReference(), 1, 1);
+                $partCount = count($parts);
                 foreach ($parts as $part) {
                     $userDataHeader = pack(
                         'cccccc',
                         5,
                         0,
                         3,
-                        substr($csmsReference, 1, 1),
-                        count($parts),
+                        $csmsReference,
+                        $partCount,
                         $sequenceNumber
                     );
                     $res            = $this->submitShortMessage(
@@ -727,7 +728,7 @@ class Client implements SmppClientInterface
                         $priority,
                         $scheduleDeliveryTime,
                         $validityPeriod,
-                        (string)($this->config->getSmsEsmClass() | 0x40) //todo: check this
+                        (string) ($this->config->getSmsEsmClass() | 0x40) //todo: check this
                     );
                     $sequenceNumber++;
                 }

@@ -711,7 +711,7 @@ class Client implements SmppClientInterface
                 $partCount = count($parts);
                 foreach ($parts as $part) {
                     $userDataHeader = pack(
-                        'cccccc',
+                        'CCCCCC',
                         5,
                         0,
                         3,

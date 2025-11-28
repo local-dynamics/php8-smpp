@@ -707,13 +707,14 @@ class Client implements SmppClientInterface
                 );
             } elseif ($this->config->getCsmsMethod() === Smpp::CSMS_8BIT_UDH && isset($parts)) {
                 $sequenceNumber = 1;
+                $csmsReference = (string) $this->getCsmsReference();
                 foreach ($parts as $part) {
                     $userDataHeader = pack(
                         'cccccc',
                         5,
                         0,
                         3,
-                        substr((string)$this->getCsmsReference(), 1, 1),
+                        substr($csmsReference, 1, 1),
                         count($parts),
                         $sequenceNumber
                     );

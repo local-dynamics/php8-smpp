@@ -33,7 +33,7 @@ class PDUBuilder
 
         $datagram = $this->packHeader($pdu, $length) . $pdu->getBody();
 
-        $this->logger->debug("Read PDU         : $length bytes");
+        $this->logger->debug("Send PDU         : $length bytes");
         $this->logger->debug(' ' . chunk_split(bin2hex($datagram), 2, " "));
         $this->logger->debug(' command_id      : 0x' . dechex($pdu->getId()));
         $this->logger->debug(' sequence number : ' . $pdu->getSequence());

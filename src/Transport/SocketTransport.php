@@ -100,7 +100,7 @@ class SocketTransport implements TransportInterface
             return false;
         }
 
-        $readList   = null;
+        $readList   = [$this->socket];
         $writeList  = null;
         $exceptList = [$this->socket];
 
@@ -115,6 +115,20 @@ class SocketTransport implements TransportInterface
         /** @var Socket[] $exceptList */
         if (!empty($exceptList)) {
             return false;
+        }
+
+        // A readable socket may mean incoming data OR that the peer closed the
+        // connection (a TCP FIN shows up as readability with 0 bytes, never as
+        // an exception). A non-destructive peek distinguishes the two: recv
+        // returns exactly 0 bytes on a clean close. Anything else (real data,
+        // or a transient EAGAIN reported as false) is treated as still open.
+        /** @var Socket[] $readList */
+        if (!empty($readList)) {
+            $buffer = '';
+            $peeked = @socket_recv($this->socket, $buffer, 1, MSG_PEEK | MSG_DONTWAIT);
+            if ($peeked === 0) {
+                return false;
+            }
         }
 
         return true;

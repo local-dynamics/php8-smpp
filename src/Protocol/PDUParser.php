@@ -131,7 +131,14 @@ class PDUParser
         $dataCoding = next($unpackedElements);
         next($unpackedElements); // sm_default_msg_id
         $sm_length = next($unpackedElements);
-        $message   = $this->getString($unpackedElements, $sm_length);
+        // short_message is an octet string of exactly sm_length bytes. For
+        // encodings that legitimately contain 0x00 bytes (UCS-2/UTF-16BE and
+        // raw binary) it must NOT be read as a null-terminated C-string,
+        // otherwise the message is truncated at the first null byte and the
+        // remaining bytes are misparsed as optional TLV parameters.
+        $message = $this->isBinaryDataCoding($dataCoding)
+            ? $this->getOctets($unpackedElements, (int)$sm_length)
+            : $this->getString($unpackedElements, (int)$sm_length);
 
         $tags = [];
 
@@ -183,6 +190,27 @@ class PDUParser
         }
 
         return $sms;
+    }
+
+    /**
+     * Whether the given data_coding carries bytes that may legitimately
+     * include 0x00 and therefore must be read as a fixed-length octet string
+     * rather than a null-terminated C-string.
+     *
+     * @param int|false $dataCoding
+     * @return bool
+     */
+    private function isBinaryDataCoding(int|false $dataCoding): bool
+    {
+        return in_array(
+            $dataCoding,
+            [
+                Smpp::DATA_CODING_UCS2,
+                Smpp::DATA_CODING_BINARY,
+                Smpp::DATA_CODING_BINARY_ALIAS,
+            ],
+            true
+        );
     }
 
     /**

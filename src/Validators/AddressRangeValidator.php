@@ -12,7 +12,11 @@ use Smpp\Exceptions\SmppInvalidArgumentException;
 class AddressRangeValidator implements ValidatorInterface
 {
     public function __construct(
-        private int $addressRangeMaxLength = 20
+        // SMPP v3.4 §5.2.7: address_range is a C-Octet String of up to 41
+        // octets. The previous default of 20 rejected spec-compliant ranges
+        // (21–41 chars). Callers needing a stricter operator limit can still
+        // pass a smaller value.
+        private int $addressRangeMaxLength = 41
     )
     {
     }

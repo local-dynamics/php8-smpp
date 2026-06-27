@@ -191,9 +191,17 @@ class Client implements SmppClientInterface
             throw new SocketTransportException('Socket is closed');
             //return false;
         }
-        $pdu = new Pdu($id, 0, $this->sequenceNumber, $pduBody);
+        $sentSequence = $this->sequenceNumber;
+        $pdu          = new Pdu($id, 0, $sentSequence, $pduBody);
         $this->sendPDU($pdu);
-        $response = $this->readPduResponse($this->sequenceNumber, $pdu->getId());
+
+        // The sequence number is consumed the moment the PDU is on the wire.
+        // Advance it before evaluating the response so a non-OK status or a
+        // read failure cannot make the next request reuse it — SMPP v3.4 §5.1.4
+        // requires unique, monotonically increasing sequence numbers per session.
+        $this->sequenceNumber++;
+
+        $response = $this->readPduResponse($sentSequence, $pdu->getId());
 
         if ($response === false) {
             throw new SmppException('Failed to read reply to command: 0x' . dechex($id));
@@ -202,8 +210,6 @@ class Client implements SmppClientInterface
         if ($response->getStatus() != CommandStatus::ESME_ROK) {
             throw new SmppException(CommandStatus::getStatusMessageByCode($response->getStatus()), $response->getStatus());
         }
-
-        $this->sequenceNumber++;
 
         // Reached max sequence number, spec does not state what happens now, so we re-connect
         if ($this->sequenceNumber >= 0x7FFFFFFF) {

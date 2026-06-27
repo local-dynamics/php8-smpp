@@ -16,6 +16,7 @@ use Smpp\Contracts\Pdu\PduInterface;
 use Smpp\Contracts\Pdu\PduResponseInterface;
 use Smpp\Contracts\Transport\TransportInterface;
 use Smpp\Exceptions\ClosedTransportException;
+use Smpp\Exceptions\PDUParseException;
 use Smpp\Exceptions\SmppException;
 use Smpp\Exceptions\SmppInvalidArgumentException;
 use Smpp\Exceptions\SocketTransportException;
@@ -65,6 +66,14 @@ class Client implements SmppClientInterface
 
     /** @var string */
     private const MODE_RECEIVER = 'receiver';
+
+    /**
+     * Upper bound for a single PDU (command_length). SMPP PDUs are small; a far
+     * larger value indicates a corrupt or desynced stream and must not be used
+     * as a blocking read size. Generous enough for any legitimate message_payload.
+     * @var int
+     */
+    private const MAX_PDU_LENGTH = 1048576; // 1 MiB
     /**
      * @var LoggerInterface
      */
@@ -292,8 +301,23 @@ class Client implements SmppClientInterface
         }
 
         // Parse PDU header to get body length and read all PDU
-        $pduHeader  = $this->parser->parsePduHeader($bufHeaders);
-        $bodyLength = $pduHeader->getCommandLength() - PDUHeader::PDU_HEADER_LENGTH;
+        $pduHeader     = $this->parser->parsePduHeader($bufHeaders);
+        $commandLength = $pduHeader->getCommandLength();
+
+        // Sanity-check command_length before trusting it as a read size. A value
+        // below the header length (corrupt/desynced stream) would make
+        // $bodyLength negative and be silently skipped by the "> 0" check below,
+        // letting an invalid PDU through. An absurdly large value would make
+        // read() block for a very long time waiting for bytes that never come —
+        // a frozen daemon. Either way the stream cannot be trusted.
+        if ($commandLength < PDUHeader::PDU_HEADER_LENGTH || $commandLength > self::MAX_PDU_LENGTH) {
+            throw new PDUParseException(
+                "Invalid PDU command_length: {$commandLength} (expected between "
+                . PDUHeader::PDU_HEADER_LENGTH . ' and ' . self::MAX_PDU_LENGTH . ')'
+            );
+        }
+
+        $bodyLength = $commandLength - PDUHeader::PDU_HEADER_LENGTH;
 
         // Read PDU body
         $body = null;

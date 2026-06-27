@@ -12,7 +12,7 @@ use Smpp\Pdu\PDUHeader;
 class PDUBuilder
 {
     public function __construct(
-        private LoggerInterface &$logger
+        private LoggerInterface $logger
     )
     {
 

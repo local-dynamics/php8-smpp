@@ -22,7 +22,7 @@ class PDUParser
     private const UINT32_BINARY_LENGTH = 4;
 
     public function __construct(
-        private LoggerInterface &$logger
+        private LoggerInterface $logger
     )
     {
 

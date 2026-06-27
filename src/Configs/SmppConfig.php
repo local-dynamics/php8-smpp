@@ -27,7 +27,10 @@ class SmppConfig
      *
      * @var string $systemType
      */
-    private string $systemType = "WWW";
+    // SMPP v3.4 §5.2.3: system_type should be NULL/empty for default SMSC
+    // settings. "WWW" is not a standard value and some SMSCs reject or
+    // misclassify it. Callers that need a specific type can still set one.
+    private string $systemType = "";
 
     /**
      * @var int

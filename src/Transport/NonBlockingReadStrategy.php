@@ -7,6 +7,7 @@ namespace Smpp\Transport;
 
 
 use Smpp\Contracts\Transport\ReadStrategyInterface;
+use Smpp\Exceptions\ClosedTransportException;
 use Smpp\Exceptions\SocketTemporaryFailureException;
 use Smpp\Exceptions\SocketTransportException;
 use Socket;
@@ -43,6 +44,14 @@ class NonBlockingReadStrategy implements ReadStrategyInterface
                     'Could not read ' . $length . ' bytes from socket; ' . socket_strerror($errorNumber),
                     $errorNumber
                 );
+            }
+            // recv() returns exactly 0 bytes when the peer has performed an
+            // orderly shutdown (FIN). Such a socket stays permanently
+            // "readable" in socket_select(), so without this guard the loop
+            // would spin forever at 100% CPU, never advancing $r and never
+            // timing out — the connection is dead, so fail fast instead.
+            if ($receivedBytes === 0) {
+                throw new ClosedTransportException('Connection closed by peer while reading from socket');
             }
             $r        += $receivedBytes;
             $datagram .= $buf;

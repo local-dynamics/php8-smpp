@@ -137,13 +137,13 @@ class SocketTransport implements TransportInterface
      * Convert a milliseconds into a socket sec+usec array
      * @param integer $millisec
      *
-     * @return array{sec: false|float, usec: int}
+     * @return array{sec: int, usec: int}
      */
     private function millisecToSolArray(int $millisec): array
     {
         $usec = $millisec * 1000;
         return [
-            'sec'  => floor($usec / 1000000),
+            'sec'  => intdiv($usec, 1000000),
             'usec' => $usec % 1000000
         ];
     }
@@ -282,9 +282,18 @@ class SocketTransport implements TransportInterface
      */
     public function close(): void
     {
+        // close() must be idempotent (interface contract) and safe to call when
+        // open() never ran or failed before assigning $this->socket. Without
+        // this guard, accessing the typed, uninitialised $socket property raises
+        // a fatal Error — e.g. in a try { open(); } finally { close(); }.
+        if (!isset($this->socket)) {
+            return;
+        }
+
         socket_set_block($this->socket);
         $this->setSocketOption(SO_LINGER, ['l_onoff' => 1, 'l_linger' => 1]);
         socket_close($this->socket);
+        unset($this->socket);
     }
 
     /**

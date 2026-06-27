@@ -41,9 +41,16 @@ class Resolver
         // Fallback if no DNS records found
         if (empty($ipv4List) && empty($ipv6List)) {
             $ip = gethostbyname($host);
-            if ($ip !== $host) {
-                yield self::createFallbackEntry($ip, $port);
+            // gethostbyname() returns the input unchanged when it cannot
+            // resolve. Fail loudly instead of yielding nothing, which would
+            // leave the caller with an empty host list and a misleading
+            // "could not connect to any host" error further down.
+            if ($ip === $host) {
+                throw new SmppInvalidArgumentException(
+                    sprintf('Unable to resolve host "%s"', $host)
+                );
             }
+            yield self::createFallbackEntry($ip, $port);
             return;
         }
 

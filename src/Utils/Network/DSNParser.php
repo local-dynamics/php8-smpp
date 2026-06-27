@@ -77,7 +77,7 @@ class DSNParser
         }
 
         [$host, $portStr] = $parts;
-        $port = self::parsePort((int)$portStr);
+        $port = self::parsePortString($portStr);
 
         // Handle IPv4 addresses
         if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
@@ -118,7 +118,7 @@ class DSNParser
         }
 
         $ip   = trim($parts[0], "[ \t\n\r\0\x0B");
-        $port = self::parsePort((int)$parts[1]);
+        $port = self::parsePortString($parts[1]);
 
         // Additional IPv6 validation
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false) {
@@ -144,5 +144,25 @@ class DSNParser
         }
 
         return $port;
+    }
+
+    /**
+     * Validates a port given as a string before casting. Casting first
+     * (e.g. (int)"abc" === 0) produced the misleading "Port must be between 1
+     * and 65535, 0 given" for any non-numeric port.
+     *
+     * @return int<1, 65535>
+     * @throws SmppInvalidArgumentException
+     */
+    private static function parsePortString(string $portStr): int
+    {
+        $portStr = trim($portStr);
+        if ($portStr === '' || !ctype_digit($portStr)) {
+            throw new SmppInvalidArgumentException(
+                sprintf('Port must be a numeric value, "%s" given', $portStr)
+            );
+        }
+
+        return self::parsePort((int)$portStr);
     }
 }

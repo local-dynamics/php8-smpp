@@ -17,8 +17,9 @@ class NonBlockingReadStrategy implements ReadStrategyInterface
     /**
      * @inheritDoc
      * @throws SocketTemporaryFailureException
+     * @throws SocketTransportException
      */
-    public function read($socket, int $length): string
+    public function read(Socket $socket, int $length): string
     {
         $datagram = "";
         $r        = 0;
@@ -29,6 +30,11 @@ class NonBlockingReadStrategy implements ReadStrategyInterface
         if ($readTimeout === false) {
             throw new SocketTransportException("Read timeout is not set");
         }
+
+        // Single deadline for the whole read. Applying the full timeout per
+        // socket_select() iteration let a fragmented read take up to
+        // (number of fragments) x timeout instead of one timeout overall.
+        $deadline = microtime(true) + $readTimeout['sec'] + $readTimeout['usec'] / 1_000_000;
 
         while ($r < $length) {
             $buf           = '';
@@ -50,13 +56,26 @@ class NonBlockingReadStrategy implements ReadStrategyInterface
                 return $datagram;
             }
 
-            // wait for data to be available, up to timeout
+            // wait for data to be available, up to the remaining deadline
+            $remaining = $deadline - microtime(true);
+            if ($remaining <= 0) {
+                throw new SocketTransportException('Timed out waiting for data on socket');
+            }
+            $sec  = (int) $remaining;
+            $usec = (int) (($remaining - $sec) * 1_000_000);
+
             $read   = [$socket];
             $write  = null;
             $except = [$socket];
 
-            // check
-            if (socket_select($read, $write, $except, $readTimeout['sec'], $readTimeout['usec']) === false) {
+            $selected = socket_select($read, $write, $except, $sec, $usec);
+            if ($selected === false) {
+                // A signal interrupted the wait (EINTR) — common in daemons that
+                // handle SIGTERM/SIGHUP. Retry within the deadline instead of
+                // tearing down the SMPP session.
+                if (socket_last_error() === SOCKET_EINTR) {
+                    continue;
+                }
                 throw new SocketTransportException(
                     'Could not examine socket; ' . socket_strerror(socket_last_error()),
                     socket_last_error()

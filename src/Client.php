@@ -570,7 +570,9 @@ class Client implements SmppClientInterface
             } // TSocket v. 0.6.0+ returns false on timeout
             //check for the enquire link command
             if ($pdu->getId() === Command::ENQUIRE_LINK) {
-                $response = new Pdu(Command::ENQUIRE_LINK_RESP, CommandStatus::ESME_ROK, $pdu->getSequence(), "\x00");
+                // enquire_link_resp has no body (SMPP v3.4 §4.11.2) — must be
+                // exactly 16 bytes, so the body is empty rather than "\x00".
+                $response = new Pdu(Command::ENQUIRE_LINK_RESP, CommandStatus::ESME_ROK, $pdu->getSequence(), "");
                 $this->sendPDU($response);
             } else if ($pdu->getId() !== Command::DELIVER_SM) { // if this is not the correct PDU add to queue
                 array_push($this->pduQueue, $pdu);

@@ -20,7 +20,10 @@ class PDUBuilder
 
     public function getEnquireLinkResponse(int $sequence): BinaryPDU
     {
-        return $this->packPdu(new Pdu(Command::ENQUIRE_LINK_RESP, CommandStatus::ESME_ROK, $sequence, "\x00"));
+        // enquire_link_resp has no body (SMPP v3.4 §4.11.2); the PDU must be
+        // exactly 16 bytes (header only). A "\x00" body would make it 17 bytes
+        // and strict SMSCs reject the session.
+        return $this->packPdu(new Pdu(Command::ENQUIRE_LINK_RESP, CommandStatus::ESME_ROK, $sequence, ""));
     }
 
     /**

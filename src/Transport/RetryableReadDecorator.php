@@ -19,7 +19,11 @@ class RetryableReadDecorator implements ReadStrategyInterface
         private int $delayMs = 100,
     )
     {
-
+        // maxRetries < 1 would skip the loop entirely and always hit the final
+        // throw without ever attempting a read, which is never useful.
+        if ($maxRetries < 1) {
+            throw new \InvalidArgumentException('maxRetries must be at least 1');
+        }
     }
 
     /**
@@ -39,6 +43,8 @@ class RetryableReadDecorator implements ReadStrategyInterface
             }
         }
 
-        throw new SocketTransportException('Read operation failed');
+        // Unreachable at runtime (maxRetries >= 1 guarantees the loop runs and
+        // either returns or rethrows), but required so every path returns/throws.
+        throw new SocketTransportException('Read operation failed'); // @codeCoverageIgnore
     }
 }

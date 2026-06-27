@@ -358,11 +358,17 @@ class Client implements SmppClientInterface
 
         $this->logger->debug('Unbinding...');
 
-        $response = $this->sendCommand(Command::UNBIND, "");
-
-        $this->logger->debug("Unbind status   : " . $response->getStatus());
-
-        $this->transport->close();
+        // The transport must be closed even if the UNBIND exchange fails
+        // (network error, timeout, non-OK status). Otherwise the underlying
+        // socket leaks on every failed close()/reconnect().
+        try {
+            $response = $this->sendCommand(Command::UNBIND, "");
+            $this->logger->debug("Unbind status   : " . $response->getStatus());
+        } catch (\Throwable $e) {
+            $this->logger->warning('Unbind failed: ' . $e->getMessage());
+        } finally {
+            $this->transport->close();
+        }
     }
 
     /**

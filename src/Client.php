@@ -143,26 +143,41 @@ class Client implements SmppClientInterface
         }
 
         // Parse reply
-        $posID   = strpos($reply->getBody(), "\0", 0);
-        $posDate = strpos($reply->getBody(), "\0", $posID + 1);
+        $body  = $reply->getBody();
+        $posID = strpos($body, "\0", 0);
 
         if ($posID === false) {
             $this->logger->debug(
                 "Invalid response",
                 [
-                    'body hex' => $reply->getBody(),
+                    'body hex' => $body,
+                ]
+            );
+            throw new SmppException('Invalid response');
+        }
+
+        // The final_date field is the second C-Octet string. Its terminator must
+        // be located *after* validating $posID; if it is missing, $posDate would
+        // be false and the substr()/unpack() below would silently read from the
+        // wrong offsets instead of failing.
+        $posDate = strpos($body, "\0", $posID + 1);
+        if ($posDate === false) {
+            $this->logger->debug(
+                "Invalid response: missing final_date terminator",
+                [
+                    'body hex' => $body,
                 ]
             );
             throw new SmppException('Invalid response');
         }
 
         $data               = [
-            'message_id' => substr($reply->getBody(), 0, $posID),
-            'final_date' => substr($reply->getBody(), $posID, (int)$posDate - $posID),
+            'message_id' => substr($body, 0, $posID),
+            'final_date' => substr($body, $posID, $posDate - $posID),
         ];
         $data['final_date'] = $data['final_date'] ? $this->parseSmppTime(trim($data['final_date'])) : null;
         /** @var false|array{message_state: mixed, error_code: mixed} $status */
-        $status = unpack("cmessage_state/cerror_code", substr($reply->getBody(), $posDate + 1));
+        $status = unpack("cmessage_state/cerror_code", substr($body, $posDate + 1));
 
         if (!$status) {
             $this->logger->debug(

@@ -630,7 +630,7 @@ class Client implements SmppClientInterface
         Address $from,
         Address $to,
         string $message,
-        array $tags = null,
+        ?array $tags = null,
         int $dataCoding = Smpp::DATA_CODING_DEFAULT,
         int $priority = 0x00,
         $scheduleDeliveryTime = null,
@@ -847,13 +847,13 @@ class Client implements SmppClientInterface
     protected function submitShortMessage(
         Address $source,
         Address $destination,
-        string $shortMessage = null,
-        array $tags = null,
+        ?string $shortMessage = null,
+        ?array $tags = null,
         int $dataCoding = Smpp::DATA_CODING_DEFAULT,
         int $priority = 0x00,
-        string $scheduleDeliveryTime = null,
-        string $validityPeriod = null,
-        string $esmClass = null
+        ?string $scheduleDeliveryTime = null,
+        ?string $validityPeriod = null,
+        ?string $esmClass = null
     ): string
     {
         if (is_null($esmClass)) {

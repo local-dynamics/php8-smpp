@@ -74,6 +74,14 @@ class Client implements SmppClientInterface
      * @var int
      */
     private const MAX_PDU_LENGTH = 1048576; // 1 MiB
+
+    /**
+     * Maximum number of unmatched PDUs buffered while waiting for an expected
+     * response. A misbehaving SMSC that keeps sending unexpected PDUs must not
+     * be able to grow this queue without bound and exhaust memory.
+     * @var int
+     */
+    private const MAX_PDU_QUEUE_SIZE = 1000;
     /**
      * @var LoggerInterface
      */
@@ -265,6 +273,22 @@ class Client implements SmppClientInterface
      * @return Pdu|false
      * @throws SmppException
      */
+    /**
+     * Buffer a PDU that is not the response currently being awaited.
+     *
+     * @throws SmppException when the queue would exceed its bound
+     */
+    private function enqueuePdu(Pdu $pdu): void
+    {
+        if (count($this->pduQueue) >= self::MAX_PDU_QUEUE_SIZE) {
+            throw new SmppException(
+                'PDU queue overflow: more than ' . self::MAX_PDU_QUEUE_SIZE
+                . ' unhandled PDUs buffered; the peer may be misbehaving'
+            );
+        }
+        $this->pduQueue[] = $pdu;
+    }
+
     protected function readPduResponse(int $sequenceNumber, int $commandID): Pdu|false
     {
         // Get response cmd id from command ID
@@ -288,7 +312,7 @@ class Client implements SmppClientInterface
                 if ($this->isExpectedResponse($pdu, $sequenceNumber, $commandID)) {
                     return $pdu;
                 }
-                array_push($this->pduQueue, $pdu); // unknown PDU push to queue
+                $this->enqueuePdu($pdu); // buffer unmatched PDU
             }
         } while ($pdu);
 
@@ -626,7 +650,7 @@ class Client implements SmppClientInterface
                 $response = new Pdu(Command::ENQUIRE_LINK_RESP, CommandStatus::ESME_ROK, $pdu->getSequence(), "");
                 $this->sendPDU($response);
             } else if ($pdu->getId() !== Command::DELIVER_SM) { // if this is not the correct PDU add to queue
-                array_push($this->pduQueue, $pdu);
+                $this->enqueuePdu($pdu);
             }
         } while ($pdu->getId() !== Command::DELIVER_SM);
 
@@ -1013,7 +1037,7 @@ class Client implements SmppClientInterface
             if ($pdu && $pdu->getId() == Command::ENQUIRE_LINK) {
                 $this->sendEnquireLinkResponse($pdu->getSequence());
             } elseif ($pdu) {
-                array_push($this->pduQueue, $pdu);
+                $this->enqueuePdu($pdu);
             }
         }
     }

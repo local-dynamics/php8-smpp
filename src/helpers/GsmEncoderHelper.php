@@ -56,72 +56,13 @@ class GsmEncoderHelper
             'æ' => "\x1D",
             'ß' => "\x1E",
             'É' => "\x1F",
-            'А' => "\x04\x10",
-            'Б' => "\x04\x11",
-            'В' => "\x04\x12",
-            'Г' => "\x04\x13",
-            'Д' => "\x04\x14",
-            'Е' => "\x04\x15",
-            'Ё' => "\x04\x01",
-            'Ж' => "\x04\x16",
-            'З' => "\x04\x17",
-            'И' => "\x04\x18",
-            'Й' => "\x04\x19",
-            'К' => "\x04\x1A",
-            'Л' => "\x04\x1B",
-            'М' => "\x04\x1C",
-            'Н' => "\x04\x1D",
-            'О' => "\x04\x1E",
-            'П' => "\x04\x1F",
-            'Р' => "\x04\x20",
-            'С' => "\x04\x21",
-            'Т' => "\x04\x22",
-            'У' => "\x04\x23",
-            'Ф' => "\x04\x24",
-            'Х' => "\x04\x25",
-            'Ц' => "\x04\x26",
-            'Ч' => "\x04\x27",
-            'Ш' => "\x04\x28",
-            'Щ' => "\x04\x29",
-            'Ь' => "\x04\x2A",
-            'Ы' => "\x04\x2B",
-            'Ъ' => "\x04\x2C",
-            'Э' => "\x04\x2D",
-            'Ю' => "\x04\x2E",
-            'Я' => "\x04\x2F",
-            'а' => "\x04\x30",
-            'б' => "\x04\x31",
-            'в' => "\x04\x32",
-            'г' => "\x04\x33",
-            'д' => "\x04\x34",
-            'е' => "\x04\x35",
-            'ё' => "\x04\x51",
-            'ж' => "\x04\x36",
-            'з' => "\x04\x37",
-            'и' => "\x04\x38",
-            'й' => "\x04\x39",
-            'к' => "\x04\x3A",
-            'л' => "\x04\x3B",
-            'м' => "\x04\x3C",
-            'н' => "\x04\x3D",
-            'о' => "\x04\x3E",
-            'п' => "\x04\x3F",
-            'р' => "\x04\x40",
-            'с' => "\x04\x41",
-            'т' => "\x04\x42",
-            'у' => "\x04\x43",
-            'ф' => "\x04\x44",
-            'х' => "\x04\x45",
-            'ц' => "\x04\x46",
-            'ч' => "\x04\x47",
-            'ш' => "\x04\x48",
-            'щ' => "\x04\x49",
-            'ь' => "\x04\x4A",
-            'ы' => "\x04\x4B",
-            'ъ' => "\x04\x4C",
-            'э' => "\x04\x4D",
-            'ю' => "\x04\x4E",
-            'я' => "\x04\x4F",
+            // Cyrillic is intentionally NOT mapped here. The previous entries
+            // encoded each letter as its big-endian Unicode code point
+            // (e.g. 'А' => "\x04\x10"), which is NOT valid GSM 03.38 — in the
+            // GSM alphabet those bytes are completely different characters
+            // (0x04='è', 0x10='Δ'). Cyrillic text must be sent via UCS-2
+            // (data_coding 0x08 / UTF-16BE) instead; unmapped characters below
+            // fall through to '?'.
             // all \x2? removed
             // all \x3? removed
             '¡' => "\x40",
@@ -147,9 +88,14 @@ class GsmEncoderHelper
             '€' => "\x1B\x65"
         ];
 
-        // Replace unconverted UTF-8 chars from codepages U+0080-U+07FF, U+0080-U+FFFF and U+010000-U+10FFFF with a single ?
-        // return preg_replace('/([\\xC0-\\xDF].)|([\\xE0-\\xEF]..)|([\\xF0-\\xFF]...)/m','?',$converted);
-        return strtr($string, $dict);
+        $converted = strtr($string, $dict);
+
+        // Replace any remaining UTF-8 characters (codepages U+0080-U+07FF,
+        // U+0800-U+FFFF and U+010000-U+10FFFF) that have no GSM 03.38 equivalent
+        // — e.g. Cyrillic — with a single '?', so raw multi-byte UTF-8 never
+        // leaks into the GSM payload. GSM output bytes are all < 0x80 (plus the
+        // 0x1B escape), so this never corrupts a converted character.
+        return preg_replace('/([\\xC0-\\xDF].)|([\\xE0-\\xEF]..)|([\\xF0-\\xFF]...)/m', '?', $converted) ?? $converted;
     }
 
     /**
@@ -162,9 +108,11 @@ class GsmEncoderHelper
      */
     public static function countGsm0338Length(string $utf8String): int
     {
-        $len = mb_strlen($utf8String, 'utf-8');
-        $len += preg_match_all('/[\\^{}\\\~€|\\[\\]]/mu', $utf8String, $m);
-        return $len;
+        // Count the actual encoded septets: each byte of the GSM 03.38 output is
+        // one septet (escaped characters such as € or { encode to two bytes / two
+        // septets). Counting UTF-8 characters instead miscounts anything that does
+        // not map 1:1 to a single GSM byte.
+        return strlen(self::utf8ToGsm0338($utf8String));
     }
 
     /**

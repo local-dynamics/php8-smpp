@@ -6,6 +6,7 @@ namespace Smpp\Configs;
 
 
 use Smpp\Contracts\Transport\ReadStrategyInterface;
+use Smpp\Exceptions\SmppInvalidArgumentException;
 use Smpp\Transport\BlockingReadStrategy;
 use Smpp\Transport\HybridReadStrategy;
 use Smpp\Transport\NonBlockingReadStrategy;
@@ -75,6 +76,12 @@ class SocketTransportConfig
      */
     public function setForceIpv6(bool $forceIpv6): SocketTransportConfig
     {
+        // forcing both families is contradictory: open() would null out both
+        // socket candidates and fail every host with a misleading
+        // "could not connect to any host" message.
+        if ($forceIpv6 && $this->forceIpv4) {
+            throw new SmppInvalidArgumentException('forceIpv4 and forceIpv6 cannot both be enabled');
+        }
         $this->forceIpv6 = $forceIpv6;
         return $this;
     }
@@ -93,6 +100,9 @@ class SocketTransportConfig
      */
     public function setForceIpv4(bool $forceIpv4): SocketTransportConfig
     {
+        if ($forceIpv4 && $this->forceIpv6) {
+            throw new SmppInvalidArgumentException('forceIpv4 and forceIpv6 cannot both be enabled');
+        }
         $this->forceIpv4 = $forceIpv4;
         return $this;
     }

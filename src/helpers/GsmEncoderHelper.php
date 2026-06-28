@@ -199,8 +199,11 @@ class GsmEncoderHelper
                 $offset -= 8;
             }
         }
-        // append the last byte
-        if ($currentByte > 0) {
+        // append the last byte if it still holds unwritten bits. The guard must
+        // test the bit offset, not the byte value: a trailing septet of 0x00
+        // (the GSM '@' character) produces a final byte of 0 that still belongs
+        // to the message and must not be dropped.
+        if ($offset > 0) {
             $packed .= chr($currentByte);
         }
         return $packed;

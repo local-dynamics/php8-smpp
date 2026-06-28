@@ -10,6 +10,7 @@ use Psr\Log\NullLogger;
 use Smpp\Configs\SmppConfig;
 use Smpp\Configs\SocketTransportConfig;
 use Smpp\Contracts\Transport\TransportInterface;
+use Smpp\Exceptions\SmppInvalidArgumentException;
 use Smpp\Transport\SCTPTransport;
 use Smpp\Transport\SocketTransport;
 use Smpp\Utils\Network\DSNParser;
@@ -122,9 +123,19 @@ class ClientBuilder
 
     /**
      * @return Client
+     * @throws SmppInvalidArgumentException
      */
     public function buildClient(): Client
     {
+        // systemId/password are only set by setCredentials(). Without this guard
+        // buildClient() would hit "Typed property must not be accessed before
+        // initialization" — a fatal Error rather than a catchable exception.
+        if (!isset($this->systemId, $this->password)) {
+            throw new SmppInvalidArgumentException(
+                'Credentials must be set via setCredentials() before calling buildClient().'
+            );
+        }
+
         if (isset($this->transport->logger) && $this->transport->logger instanceof LoggerInterface) {
             $this->transport->logger = $this->logger;
         }

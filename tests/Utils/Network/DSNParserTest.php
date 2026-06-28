@@ -40,6 +40,19 @@ class DSNParserTest extends TestCase
 
     public function testParseIPv6DSN(): void
     {
+        self::assertSame(['::1', 2776], DSNParser::parseIPv6DSN('[::1]:2776'));
+        self::assertSame(['2001:db8::1', 9000], DSNParser::parseIPv6DSN('[2001:db8::1]:9000'));
+    }
 
+    public function testParseIPv6DSNRejectsMissingBrackets(): void
+    {
+        $this->expectException(SmppInvalidArgumentException::class);
+        DSNParser::parseIPv6DSN('::1:2776');
+    }
+
+    public function testParseIPv6DSNRejectsInvalidAddress(): void
+    {
+        $this->expectException(SmppInvalidArgumentException::class);
+        DSNParser::parseIPv6DSN('[not-an-ip]:2776');
     }
 }

@@ -94,6 +94,14 @@ class Resolver
     public static function resolveIPs(string $host, int $type): array
     {
         $records = (self::$dnsResolver)($host, $type);
+
+        // dns_get_record() returns false on lookup failure (network error,
+        // SERVFAIL, unresolvable host), not an empty array. Passing false to
+        // array_column() would raise a TypeError, so treat it as "no records".
+        if ($records === false) {
+            return [];
+        }
+
         return array_column($records, $type === DNS_A ? 'ip' : 'ipv6');
     }
 

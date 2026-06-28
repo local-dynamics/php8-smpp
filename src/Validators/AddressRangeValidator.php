@@ -23,6 +23,13 @@ class AddressRangeValidator implements ValidatorInterface
      */
     public function isValid($value): ?SmppException
     {
+        // An empty value means "no filter" (match all addresses) and is always
+        // valid. The character regex below uses "+" (one or more), so without
+        // this guard an empty string would be wrongly rejected.
+        if ($value === '') {
+            return null;
+        }
+
         //Maximum length (depending on operator)
         if ($this->maxLengthValidation($value)) {
             return new SmppInvalidArgumentException("addrRange too long (max $this->addressRangeMaxLength chars)");
@@ -36,14 +43,6 @@ class AddressRangeValidator implements ValidatorInterface
         // Check wildcard * (if not allowed in the middle)
         if (str_contains($value, '*') && !str_ends_with($value, '*')) {
             return new SmppInvalidArgumentException("Wildcard * is only allowed at the end of addrRange");
-        }
-
-        // Wildcard check ? (must replace exactly 1 character)
-        if (str_contains($value, '?')) {
-            $withoutWildcards = str_replace('?', '', $value);
-            if (strlen($withoutWildcards) + substr_count($value, '?') !== strlen($value)) {
-                return new SmppInvalidArgumentException("Wildcard ? must replace exactly one character");
-            }
         }
 
         return null;

@@ -8,6 +8,7 @@ namespace Smpp\Configs;
 
 use Smpp\Contracts\ValidatorInterface;
 use Smpp\Exceptions\SmppException;
+use Smpp\Exceptions\SmppInvalidArgumentException;
 use Smpp\Smpp;
 use Smpp\Validators\AddressRangeValidator;
 use Smpp\Validators\NumberingPlanIndicatorValidator;
@@ -141,6 +142,9 @@ class SmppConfig
      */
     public function setCsmsMethod(int $csmsMethod): SmppConfig
     {
+        if (!in_array($csmsMethod, [Smpp::CSMS_16BIT_TAGS, Smpp::CSMS_PAYLOAD, Smpp::CSMS_8BIT_UDH], true)) {
+            throw new SmppInvalidArgumentException('csmsMethod must be one of the Smpp::CSMS_* constants');
+        }
         $this->csmsMethod = $csmsMethod;
         return $this;
     }
@@ -330,6 +334,10 @@ class SmppConfig
      */
     public function setSmsPriorityFlag(int $smsPriorityFlag): SmppConfig
     {
+        // SMPP v3.4 §5.2.14: priority_flag is 0–3.
+        if ($smsPriorityFlag < 0 || $smsPriorityFlag > 3) {
+            throw new SmppInvalidArgumentException('smsPriorityFlag must be between 0 and 3');
+        }
         $this->smsPriorityFlag = $smsPriorityFlag;
         return $this;
     }
@@ -366,6 +374,10 @@ class SmppConfig
      */
     public function setSmsReplaceIfPresentFlag(int $smsReplaceIfPresentFlag): SmppConfig
     {
+        // SMPP v3.4 §5.2.16: replace_if_present_flag is 0 or 1.
+        if ($smsReplaceIfPresentFlag < 0 || $smsReplaceIfPresentFlag > 1) {
+            throw new SmppInvalidArgumentException('smsReplaceIfPresentFlag must be 0 or 1');
+        }
         $this->smsReplaceIfPresentFlag = $smsReplaceIfPresentFlag;
         return $this;
     }
@@ -384,6 +396,10 @@ class SmppConfig
      */
     public function setSmsSmDefaultMessageID(int $smsSmDefaultMessageID): SmppConfig
     {
+        // SMPP v3.4 §5.2.18: sm_default_msg_id is 0–254.
+        if ($smsSmDefaultMessageID < 0 || $smsSmDefaultMessageID > 254) {
+            throw new SmppInvalidArgumentException('smsSmDefaultMessageID must be between 0 and 254');
+        }
         $this->smsSmDefaultMessageID = $smsSmDefaultMessageID;
         return $this;
     }

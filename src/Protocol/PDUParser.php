@@ -246,10 +246,20 @@ class PDUParser
      */
     private function parseTag(array &$ar): false|Tag
     {
-        $unpackedData = unpack(
-            'nid/nlength',
-            pack("C2C2", next($ar), next($ar), next($ar), next($ar))
-        );
+        $b1 = next($ar);
+        $b2 = next($ar);
+        $b3 = next($ar);
+        $b4 = next($ar);
+
+        // A TLV header is 4 octets (2-byte id + 2-byte length). If fewer remain
+        // — e.g. a trailing stray null byte some SMSCs append — there is no
+        // further tag. Without this check, next() returning false was packed as
+        // 0, yielding a corrupt tag (non-zero id with length 0) instead of stop.
+        if ($b1 === false || $b2 === false || $b3 === false || $b4 === false) {
+            return false;
+        }
+
+        $unpackedData = unpack('nid/nlength', pack("C4", $b1, $b2, $b3, $b4));
 
         if (!$unpackedData) {
             throw new SmppException('Could not read tag data');
@@ -298,7 +308,12 @@ class PDUParser
              */
             $asciiCode = next($ar);
             if ($asciiCode === false) {
-                return $string;
+                // The declared length runs past the actual PDU body — a
+                // malformed/truncated PDU. Fail instead of silently returning a
+                // short value the caller would treat as complete.
+                throw new PDUParseException(
+                    "Unexpected end of PDU body: expected {$length} octets but only {$i} were available"
+                );
             }
             $string .= chr($asciiCode);
         }

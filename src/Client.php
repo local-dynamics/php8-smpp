@@ -487,12 +487,9 @@ class Client implements SmppClientInterface
             $this->config->getAddressRange()
         );
 
-        $response = $this->sendCommand($commandID, $pduBody);
-        if ($response->getStatus() != CommandStatus::ESME_ROK) {
-            throw new SmppException(CommandStatus::getStatusMessageByCode($response->getStatus()), $response->getStatus());
-        }
-
-        return $response;
+        // sendCommand() already throws on a non-ESME_ROK status, so the status
+        // re-check that used to be here was unreachable dead code.
+        return $this->sendCommand($commandID, $pduBody);
     }
 
     /**
@@ -786,6 +783,7 @@ class Client implements SmppClientInterface
                 $sequenceNumber = 1;
                 $csmsReference = $this->getCsmsReference();
                 $partCount = count($parts);
+                $res = null;
                 foreach ($parts as $part) {
                     $userDataHeader = pack(
                         'CCCCCC',
@@ -814,6 +812,7 @@ class Client implements SmppClientInterface
                 $sarMessageRefNumber = new Tag(Tag::SAR_MSG_REF_NUM, $this->getCsmsReference(), 2, 'n');
                 $sarTotalSegments    = new Tag(Tag::SAR_TOTAL_SEGMENTS, count($parts ?? []), 1, 'c');
                 $sequenceNumber      = 1;
+                $res                 = null;
                 foreach ($parts ?? [] as $part) {
                     $sartags = [
                         $sarMessageRefNumber,

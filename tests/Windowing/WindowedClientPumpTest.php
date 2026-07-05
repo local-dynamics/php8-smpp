@@ -33,7 +33,7 @@ class WindowedClientPumpTest extends TestCase
         self::assertCount(1, $result->completed);
         self::assertTrue($result->completed[0]->success);
         self::assertSame('row-1', $result->completed[0]->context);
-        self::assertSame('MID-1', rtrim($result->completed[0]->messageId, "\0"));
+        self::assertSame('MID-1', $result->completed[0]->messageId);
         self::assertSame(0, $client->pendingCount());
     }
 
@@ -123,9 +123,41 @@ class WindowedClientPumpTest extends TestCase
 
         $byContext = [];
         foreach ($result->completed as $r) {
-            $byContext[$r->context] = rtrim($r->messageId, "\0");
+            $byContext[$r->context] = $r->messageId;
         }
         self::assertSame(['row-1' => 'MID-1', 'row-2' => 'MID-2'], $byContext);
+    }
+
+    public function testMultiSegmentGroupCompletesOnlyWhenAllSegmentsAcked(): void
+    {
+        // str_repeat('a', 400) with DATA_CODING_DEFAULT and the default CSMS_16BIT_TAGS
+        // method (csmsSplit=152) yields 3 segments: [152, 152, 96] chars → sequences 1, 2, 3.
+        $transport = new ScriptedTransport();
+        $client = new WindowedClient($transport, 'sysid', 'secret');
+        $client->config->setWindowSize(10);
+
+        $client->submitAsync('row-csms', $this->addr('111'), $this->addr('222'), str_repeat('a', 400));
+
+        // Partial ack: only sequences 1 and 2 answered — group must NOT surface yet.
+        $transport->queue($this->pdu(Command::SUBMIT_SM_RESP, CommandStatus::ESME_ROK, 1, "MID-1\0"));
+        $transport->queue($this->pdu(Command::SUBMIT_SM_RESP, CommandStatus::ESME_ROK, 2, "MID-2\0"));
+
+        $result = $client->pump();
+
+        self::assertSame([], $result->completed, 'Group must not surface until all 3 segments are acked');
+        self::assertGreaterThan(0, $client->pendingCount());
+
+        // Final ack: sequence 3 answered — group must now complete.
+        $transport->queue($this->pdu(Command::SUBMIT_SM_RESP, CommandStatus::ESME_ROK, 3, "MID-3\0"));
+
+        $result = $client->pump();
+
+        self::assertCount(1, $result->completed);
+        self::assertTrue($result->completed[0]->success);
+        self::assertSame('row-csms', $result->completed[0]->context);
+        // lastMessageId() returns the last non-empty messageId across all segments (MID-3).
+        self::assertSame('MID-3', $result->completed[0]->messageId);
+        self::assertSame(0, $client->pendingCount());
     }
 
     private function addr(string $value): Address

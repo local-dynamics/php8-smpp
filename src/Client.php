@@ -901,6 +901,7 @@ class Client implements SmppClientInterface
                         $part    = "";
                     }
                     $part .= $c;
+                    $n++;
                 }
                 $parts[] = $part;
                 return $parts;

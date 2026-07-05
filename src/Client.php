@@ -930,14 +930,46 @@ class Client implements SmppClientInterface
         ?string $scheduleDeliveryTime = null,
         ?string $validityPeriod = null,
         ?string $esmClass = null
-    ): string
-    {
+    ): string {
+        $body = $this->buildSubmitSmBody(
+            $source,
+            $destination,
+            $shortMessage,
+            $tags,
+            $dataCoding,
+            $priority,
+            $scheduleDeliveryTime,
+            $validityPeriod,
+            $esmClass
+        );
+
+        return $this->submitSegment($body);
+    }
+
+    /**
+     * Build the submit_sm PDU body (mandatory fields + appended TLV tags).
+     * Shared by the synchronous submit path and the windowed submit path so
+     * both produce identical bytes.
+     *
+     * @param Tag[]|null $tags
+     * @throws Exception
+     */
+    protected function buildSubmitSmBody(
+        Address $source,
+        Address $destination,
+        ?string $shortMessage = null,
+        ?array $tags = null,
+        int $dataCoding = Smpp::DATA_CODING_DEFAULT,
+        int $priority = 0x00,
+        ?string $scheduleDeliveryTime = null,
+        ?string $validityPeriod = null,
+        ?string $esmClass = null
+    ): string {
         if (is_null($esmClass)) {
             $esmClass = $this->config->getSmsEsmClass();
         }
 
         $shortMessageLength = strlen((string)$shortMessage);
-        // Construct PDU with mandatory fields
         $pdu = pack(
             'a1cca' . (strlen($source->getValue()) + 1)
             . 'cca' . (strlen($destination->getValue()) + 1)
@@ -959,24 +991,33 @@ class Client implements SmppClientInterface
             $this->config->getSmsReplaceIfPresentFlag(),
             $dataCoding,
             $this->config->getSmsSmDefaultMessageID(),
-            $shortMessageLength, //sm_length
-            $shortMessage //short_message
+            $shortMessageLength,
+            $shortMessage
         );
 
-        // Add any tags
         if (!empty($tags)) {
             foreach ($tags as $tag) {
                 $pdu .= $tag->getBinary();
             }
         }
 
-        $response = $this->sendCommand(Command::SUBMIT_SM, $pdu);
-        /** @var array{msgid: string}|false $body */
-        $body = unpack("a*msgid", $response->getBody());
-        if (!$body) {
+        return $pdu;
+    }
+
+    /**
+     * Send one already-built submit_sm body and return the SMSC message id.
+     *
+     * @throws Exception
+     */
+    protected function submitSegment(string $body): string
+    {
+        $response = $this->sendCommand(Command::SUBMIT_SM, $body);
+        /** @var array{msgid: string}|false $unpacked */
+        $unpacked = unpack("a*msgid", $response->getBody());
+        if (!$unpacked) {
             throw new SmppException('unable to unpack response body:' . $response->getBody());
         }
-        return $body['msgid'];
+        return $unpacked['msgid'];
     }
 
     /**

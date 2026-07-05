@@ -9,7 +9,9 @@ use Smpp\Client;
 use Smpp\Contracts\Transport\TransportInterface;
 use Smpp\Exceptions\SmppException;
 use Smpp\Pdu\Address;
+use Smpp\Pdu\DeliveryReceipt;
 use Smpp\Pdu\Pdu;
+use Smpp\Pdu\Sms;
 use Smpp\Pdu\Tag;
 use Smpp\Protocol\Command;
 use Smpp\Protocol\CommandStatus;
@@ -101,5 +103,82 @@ class WindowedClient extends Client
         }
 
         $this->window()->add($groupId, $context, $sequenceNumbers, ($this->clock)());
+    }
+
+    /**
+     * Drain immediately-available PDUs from the transport, match submit_sm_resp
+     * to in-flight segments, auto-answer deliver_sm and enquire_link, and
+     * surface completed logical messages (success/SMSC error), timeouts and
+     * inbound SMS. Non-blocking beyond the transport's own read timeout.
+     *
+     * @param int $maxPdus per-call read budget; <= 0 uses 2 * windowSize + 8.
+     * @throws \Exception
+     */
+    public function pump(int $maxPdus = 0): PumpResult
+    {
+        if ($maxPdus <= 0) {
+            $maxPdus = 2 * $this->config->getWindowSize() + 8;
+        }
+
+        /** @var array<int, DeliveryReceipt|Sms> $incoming */
+        $incoming = [];
+        $read = 0;
+
+        while ($read < $maxPdus && $this->transport->hasData()) {
+            $pdu = $this->readPDU();
+            if ($pdu === false) {
+                break;
+            }
+            $read++;
+
+            switch ($pdu->getId()) {
+                case Command::SUBMIT_SM_RESP:
+                    $messageId = '';
+                    $body = $pdu->getBody();
+                    if ($body !== '') {
+                        /** @var array{msgid: string}|false $unpacked */
+                        $unpacked = unpack('a*msgid', $body);
+                        if ($unpacked) {
+                            $messageId = rtrim($unpacked['msgid'], "\0");
+                        }
+                    }
+                    $this->window()->matchResponse($pdu->getSequence(), $pdu->getStatus(), $messageId);
+                    break;
+
+                case Command::GENERIC_NACK:
+                    $this->window()->matchResponse($pdu->getSequence(), $pdu->getStatus(), '');
+                    break;
+
+                case Command::DELIVER_SM:
+                    // parseSMS() also sends the deliver_sm_resp.
+                    $incoming[] = $this->parseSMS($pdu);
+                    break;
+
+                case Command::ENQUIRE_LINK:
+                    $this->sendPDU(new Pdu(
+                        Command::ENQUIRE_LINK_RESP,
+                        CommandStatus::ESME_ROK,
+                        $pdu->getSequence(),
+                        ''
+                    ));
+                    break;
+
+                default:
+                    $this->enqueuePdu($pdu);
+                    break;
+            }
+        }
+
+        $completed = [];
+        foreach ($this->window()->takeCompleted() as $group) {
+            $completed[] = $group->hasError()
+                ? SubmitResult::smscError($group->context(), $group->firstErrorStatus())
+                : SubmitResult::ok($group->context(), $group->lastMessageId());
+        }
+        foreach ($this->window()->takeTimedOut(($this->clock)()) as $group) {
+            $completed[] = SubmitResult::timeout($group->context());
+        }
+
+        return new PumpResult($completed, $incoming);
     }
 }

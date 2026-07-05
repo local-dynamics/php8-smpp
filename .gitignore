@@ -6,3 +6,4 @@ composer.lock
 /docker
 docker-compose.yaml
 .phpunit.result.cache
+/docs/superpowers/

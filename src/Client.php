@@ -709,133 +709,148 @@ class Client implements SmppClientInterface
         int $priority = 0x00,
         $scheduleDeliveryTime = null,
         $validityPeriod = null
-    ): bool|string
-    {
-        $messageLength = strlen($message);
-
-        if ($messageLength > 160 && !in_array($dataCoding, [Smpp::DATA_CODING_UCS2, Smpp::DATA_CODING_DEFAULT])) {
+    ): bool|string {
+        if (!$this->isMessageSendable(strlen($message), $dataCoding)) {
             return false;
         }
 
+        $segments = $this->buildSubmitSmSegments(
+            $from, $to, $message, $tags, $dataCoding, $priority, $scheduleDeliveryTime, $validityPeriod
+        );
+
+        $messageId = '';
+        foreach ($segments as $segment) {
+            $messageId = $this->submitSegment($segment);
+        }
+
+        return $messageId;
+    }
+
+    /**
+     * Whether a message of the given length can be sent with the given
+     * data_coding. Long messages are only splittable for GSM 03.38 (default)
+     * and UCS-2 encodings.
+     */
+    protected function isMessageSendable(int $messageLength, int $dataCoding): bool
+    {
+        return $messageLength <= 160
+            || in_array($dataCoding, [Smpp::DATA_CODING_UCS2, Smpp::DATA_CODING_DEFAULT], true);
+    }
+
+    /**
+     * Build the ordered list of submit_sm bodies for a message, applying the
+     * same encoding, splitting and CSMS logic as sendSMS(). A single-part
+     * message yields exactly one body.
+     *
+     * Callers must first check isMessageSendable(); this method assumes the
+     * (length, dataCoding) combination is valid.
+     *
+     * @param Tag[]|null $tags
+     * @return string[]
+     * @throws Exception
+     */
+    protected function buildSubmitSmSegments(
+        Address $from,
+        Address $to,
+        string $message,
+        ?array $tags = null,
+        int $dataCoding = Smpp::DATA_CODING_DEFAULT,
+        int $priority = 0x00,
+        mixed $scheduleDeliveryTime = null,
+        mixed $validityPeriod = null
+    ): array {
+        $scheduleDeliveryTime = is_string($scheduleDeliveryTime) ? $scheduleDeliveryTime : null;
+        $validityPeriod = is_string($validityPeriod) ? $validityPeriod : null;
+
+        $messageLength = strlen($message);
+        $csmsSplit = 132;
+
         switch ($dataCoding) {
             case Smpp::DATA_CODING_UCS2:
-                // in octets, 70 UCS-2 chars
                 $singleSmsOctetLimit = 140;
-                // There are 133 octets available, but this would split the UCS in the middle, so use 132 instead
                 $csmsSplit = 132;
-                /**
-                 * Convert message to UTF-16 encoding for proper SMPP UCS-2 compatibility
-                 *
-                 * Uses UTF-16 instead of basic UCS-2 to support:
-                 * - Modern Unicode characters (emojis, symbols beyond BMP)
-                 * - Surrogate pairs (required for characters above U+FFFF)
-                 * - Full compliance with SMPP spec which actually expects UTF-16BE
-                 *   despite referring to it as "UCS-2" (common industry practice)
-                 *
-                 * Note: UTF-16BE is explicitly used rather than system-dependent UTF-16
-                 * to ensure consistent big-endian byte ordering as required by SMPP.
-                 *
-                 * @see SMPP v3.4+ specification section 5.2.19 (data_coding interpretation)
-                 */
                 $message = mb_convert_encoding($message, 'UTF-16BE', 'UTF-8');
-                //Update message length with current encoding
                 $messageLength = strlen($message);
                 break;
             case Smpp::DATA_CODING_DEFAULT:
-                //We send data in octets, but GSM 03.38 will be packed in septets (7-bit) by SMSC.
                 $singleSmsOctetLimit = 160;
-                // send 152/153 chars in each SMS (SMSC will format data)
                 $csmsSplit = ($this->config->getCsmsMethod() === Smpp::CSMS_8BIT_UDH) ? 153 : 152;
                 break;
             default:
-                $singleSmsOctetLimit = 254; // From SMPP standard
+                $singleSmsOctetLimit = 254;
                 break;
         }
 
-        // Figure out if we need to do CSMS, since it will affect our PDU
-        if ($messageLength > $singleSmsOctetLimit) {
-            $doCsms = true;
-            if ($this->config->getCsmsMethod() !== Smpp::CSMS_PAYLOAD) {
-                $parts        = $this->splitMessageString($message, $csmsSplit ?? 132, $dataCoding);
-                $shortMessage = reset($parts);
-            }
-        } else {
-            $shortMessage = $message;
-            $doCsms       = false;
+        // Single segment (no CSMS)
+        if ($messageLength <= $singleSmsOctetLimit) {
+            return [
+                $this->buildSubmitSmBody(
+                    $from, $to, $message, $tags, $dataCoding, $priority, $scheduleDeliveryTime, $validityPeriod
+                ),
+            ];
         }
 
-        // Deal with CSMS
-        if ($doCsms) {
-            if ($this->config->getCsmsMethod() === Smpp::CSMS_PAYLOAD) {
-                $payload = new Tag(Tag::MESSAGE_PAYLOAD, $message, $messageLength);
-                $tags[]  = $payload;
-                return $this->submitShortMessage(
+        // CSMS via message_payload TLV: still a single submit_sm
+        if ($this->config->getCsmsMethod() === Smpp::CSMS_PAYLOAD) {
+            $payloadTags = $tags ?? [];
+            $payloadTags[] = new Tag(Tag::MESSAGE_PAYLOAD, $message, $messageLength);
+            return [
+                $this->buildSubmitSmBody(
+                    $from, $to, null, $payloadTags, $dataCoding, $priority, $scheduleDeliveryTime, $validityPeriod
+                ),
+            ];
+        }
+
+        $parts = $this->splitMessageString($message, $csmsSplit, $dataCoding);
+        $segments = [];
+
+        if ($this->config->getCsmsMethod() === Smpp::CSMS_8BIT_UDH) {
+            $sequenceNumber = 1;
+            $csmsReference = $this->getCsmsReference();
+            $partCount = count($parts);
+            foreach ($parts as $part) {
+                $userDataHeader = pack('CCCCCC', 5, 0, 3, $csmsReference, $partCount, $sequenceNumber);
+                $segments[] = $this->buildSubmitSmBody(
                     $from,
                     $to,
-                    null,
+                    $userDataHeader . $part,
                     $tags,
                     $dataCoding,
                     $priority,
                     $scheduleDeliveryTime,
-                    $validityPeriod
+                    $validityPeriod,
+                    (string)($this->config->getSmsEsmClass() | 0x40)
                 );
-            } elseif ($this->config->getCsmsMethod() === Smpp::CSMS_8BIT_UDH && isset($parts)) {
-                $sequenceNumber = 1;
-                $csmsReference = $this->getCsmsReference();
-                $partCount = count($parts);
-                $res = null;
-                foreach ($parts as $part) {
-                    $userDataHeader = pack(
-                        'CCCCCC',
-                        5,
-                        0,
-                        3,
-                        $csmsReference,
-                        $partCount,
-                        $sequenceNumber
-                    );
-                    $res            = $this->submitShortMessage(
-                        $from,
-                        $to,
-                        $userDataHeader . $part,
-                        $tags,
-                        $dataCoding,
-                        $priority,
-                        $scheduleDeliveryTime,
-                        $validityPeriod,
-                        (string) ($this->config->getSmsEsmClass() | 0x40) //todo: check this
-                    );
-                    $sequenceNumber++;
-                }
-                return $res ?? "";
-            } else {
-                $sarMessageRefNumber = new Tag(Tag::SAR_MSG_REF_NUM, $this->getCsmsReference(), 2, 'n');
-                $sarTotalSegments    = new Tag(Tag::SAR_TOTAL_SEGMENTS, count($parts ?? []), 1, 'c');
-                $sequenceNumber      = 1;
-                $res                 = null;
-                foreach ($parts ?? [] as $part) {
-                    $sartags = [
-                        $sarMessageRefNumber,
-                        $sarTotalSegments,
-                        new Tag(Tag::SAR_SEGMENT_SEQNUM, $sequenceNumber, 1, 'c')
-                    ];
-                    $res     = $this->submitShortMessage(
-                        $from,
-                        $to,
-                        (string)$part,
-                        (empty($tags) ? $sartags : array_merge($tags, $sartags)),
-                        $dataCoding,
-                        $priority,
-                        $scheduleDeliveryTime,
-                        $validityPeriod
-                    );
-                    $sequenceNumber++;
-                }
-                return $res ?? "";
+                $sequenceNumber++;
             }
+
+            return $segments;
         }
 
-        return $this->submitShortMessage($from, $to, (string)($shortMessage ?? ''), $tags, $dataCoding, $priority);
+        // Default: CSMS_16BIT_TAGS (SAR TLVs)
+        $sarMessageRefNumber = new Tag(Tag::SAR_MSG_REF_NUM, $this->getCsmsReference(), 2, 'n');
+        $sarTotalSegments = new Tag(Tag::SAR_TOTAL_SEGMENTS, count($parts), 1, 'c');
+        $sequenceNumber = 1;
+        foreach ($parts as $part) {
+            $sartags = [
+                $sarMessageRefNumber,
+                $sarTotalSegments,
+                new Tag(Tag::SAR_SEGMENT_SEQNUM, $sequenceNumber, 1, 'c'),
+            ];
+            $segments[] = $this->buildSubmitSmBody(
+                $from,
+                $to,
+                (string)$part,
+                (empty($tags) ? $sartags : array_merge($tags, $sartags)),
+                $dataCoding,
+                $priority,
+                $scheduleDeliveryTime,
+                $validityPeriod
+            );
+            $sequenceNumber++;
+        }
+
+        return $segments;
     }
 
     /**

@@ -756,12 +756,9 @@ class Client implements SmppClientInterface
         ?array $tags = null,
         int $dataCoding = Smpp::DATA_CODING_DEFAULT,
         int $priority = 0x00,
-        mixed $scheduleDeliveryTime = null,
-        mixed $validityPeriod = null
+        ?string $scheduleDeliveryTime = null,
+        ?string $validityPeriod = null
     ): array {
-        $scheduleDeliveryTime = is_string($scheduleDeliveryTime) ? $scheduleDeliveryTime : null;
-        $validityPeriod = is_string($validityPeriod) ? $validityPeriod : null;
-
         $messageLength = strlen($message);
         $csmsSplit = 132;
 
@@ -781,12 +778,13 @@ class Client implements SmppClientInterface
                 break;
         }
 
-        // Single segment (no CSMS)
+        // Single segment (no CSMS): the original sendSMS() called submitShortMessage() with only
+        // 6 arguments, so scheduleDeliveryTime and validityPeriod were always omitted (null on the
+        // wire) for single-part messages regardless of what the caller passed. Preserve that
+        // behaviour exactly — do NOT forward schedule/validity here.
         if ($messageLength <= $singleSmsOctetLimit) {
             return [
-                $this->buildSubmitSmBody(
-                    $from, $to, $message, $tags, $dataCoding, $priority, $scheduleDeliveryTime, $validityPeriod
-                ),
+                $this->buildSubmitSmBody($from, $to, $message, $tags, $dataCoding, $priority),
             ];
         }
 

@@ -19,6 +19,21 @@ class BuildSubmitSmSegmentsTest extends TestCase
         self::assertCount(1, $segments);
     }
 
+    /**
+     * Finding 1 regression: the original sendSMS() did NOT forward scheduleDeliveryTime /
+     * validityPeriod for the single-segment path (it called submitShortMessage with 6 args).
+     * The single-segment branch of buildSubmitSmSegments() must replicate that behaviour:
+     * a non-null schedule time must NOT appear in the produced body.
+     */
+    public function testSingleSegmentBodyDoesNotContainScheduleDeliveryTime(): void
+    {
+        $scheduleTime = '261231235900000+'; // 16-char SMPP time string
+        $segments = $this->segmentsWithSchedule(str_repeat('a', 50), $scheduleTime);
+
+        self::assertCount(1, $segments);
+        self::assertStringNotContainsString($scheduleTime, $segments[0]);
+    }
+
     public function testLongDefaultMessageIsSplitIntoMultipleSegments(): void
     {
         // > 160 GSM chars with the default CSMS method (16-bit SAR tags) -> multiple segments
@@ -28,6 +43,32 @@ class BuildSubmitSmSegmentsTest extends TestCase
             self::assertIsString($segment);
             self::assertNotSame('', $segment);
         }
+    }
+
+    /**
+     * @return string[]
+     */
+    private function segmentsWithSchedule(string $message, string $scheduleDeliveryTime): array
+    {
+        $client = new Client($this->transport(), 'sysid', 'secret');
+
+        $method = new ReflectionMethod(Client::class, 'buildSubmitSmSegments');
+        $method->setAccessible(true);
+
+        /** @var string[] $result */
+        $result = $method->invoke(
+            $client,
+            new Address('12345', Smpp::TON_INTERNATIONAL, Smpp::NPI_E164),
+            new Address('67890', Smpp::TON_INTERNATIONAL, Smpp::NPI_E164),
+            $message,
+            null,
+            Smpp::DATA_CODING_DEFAULT,
+            0x00,
+            $scheduleDeliveryTime,
+            null
+        );
+
+        return $result;
     }
 
     /**

@@ -278,7 +278,7 @@ class Client implements SmppClientInterface
      *
      * @throws SmppException when the queue would exceed its bound
      */
-    private function enqueuePdu(Pdu $pdu): void
+    protected function enqueuePdu(Pdu $pdu): void
     {
         if (count($this->pduQueue) >= self::MAX_PDU_QUEUE_SIZE) {
             throw new SmppException(

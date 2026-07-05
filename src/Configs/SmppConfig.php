@@ -106,6 +106,20 @@ class SmppConfig
      */
     private int $reconnectSleepTime = 1_000_000;
 
+    /**
+     * Maximum number of simultaneously unacknowledged submit_sm segments
+     * (SMPP windowing). Counts segments, not logical messages.
+     * @var int
+     */
+    private int $windowSize = 10;
+
+    /**
+     * In-flight timeout per segment in milliseconds. A submit_sm without a
+     * response within this window is reported as a timeout failure.
+     * @var int
+     */
+    private int $windowTimeoutMs = 30000;
+
     public function __construct()
     {
     }
@@ -416,6 +430,34 @@ class SmppConfig
     public function setReconnectSleepTime(int $reconnectSleepTime): SmppConfig
     {
         $this->reconnectSleepTime = $reconnectSleepTime;
+        return $this;
+    }
+
+    public function getWindowSize(): int
+    {
+        return $this->windowSize;
+    }
+
+    public function setWindowSize(int $windowSize): SmppConfig
+    {
+        if ($windowSize < 1) {
+            throw new SmppInvalidArgumentException('windowSize must be at least 1');
+        }
+        $this->windowSize = $windowSize;
+        return $this;
+    }
+
+    public function getWindowTimeoutMs(): int
+    {
+        return $this->windowTimeoutMs;
+    }
+
+    public function setWindowTimeoutMs(int $windowTimeoutMs): SmppConfig
+    {
+        if ($windowTimeoutMs < 1) {
+            throw new SmppInvalidArgumentException('windowTimeoutMs must be at least 1');
+        }
+        $this->windowTimeoutMs = $windowTimeoutMs;
         return $this;
     }
 }

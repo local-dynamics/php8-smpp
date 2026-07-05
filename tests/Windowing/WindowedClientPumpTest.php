@@ -160,9 +160,75 @@ class WindowedClientPumpTest extends TestCase
         self::assertSame(0, $client->pendingCount());
     }
 
+    /**
+     * A deliver_sm whose esm_class has ESM_DELIVER_SMSC_RECEIPT set (0x04)
+     * but whose message text does not match the delivery receipt regex causes
+     * parseSMS() → parseSms() → DeliveryReceipt::parseDeliveryReceipt() to
+     * throw SmppInvalidArgumentException.
+     * pump() must catch this, log a warning, and continue the loop — the bad
+     * PDU must be absent from `incoming`, and any submit_sm_resp queued after
+     * it must still resolve its in-flight group.
+     */
+    public function testMalformedDeliverSmIsSkippedAndLoopContinues(): void
+    {
+        $transport = new ScriptedTransport();
+        $now = 1000.0;
+        $client = new WindowedClient($transport, 'sysid', 'secret', function () use (&$now): float {
+            return $now;
+        });
+        $client->config->setWindowSize(5);
+
+        // Submit one message; it occupies sequence number 1 in the window.
+        $client->submitAsync('ctx-1', $this->addr('111'), $this->addr('222'), 'hello');
+
+        // A deliver_sm whose esm_class=0x04 (delivery-receipt bit) but whose
+        // body "bad receipt" does not satisfy the delivery-receipt regex.
+        $transport->queue($this->pdu(Command::DELIVER_SM, CommandStatus::ESME_ROK, 99, $this->malformedDeliveryReceiptBody()));
+
+        // A valid submit_sm_resp for the in-flight segment (sequence 1).
+        $transport->queue($this->pdu(Command::SUBMIT_SM_RESP, CommandStatus::ESME_ROK, 1, "MID-1\0"));
+
+        // Must not throw; bad PDU skipped; valid resp still completes the group.
+        $result = $client->pump();
+
+        self::assertSame([], $result->incoming, 'Malformed deliver_sm must not appear in incoming');
+        self::assertCount(1, $result->completed, 'submit_sm_resp after the bad PDU must still complete its group');
+        self::assertTrue($result->completed[0]->success);
+        self::assertSame('ctx-1', $result->completed[0]->context);
+        self::assertSame('MID-1', $result->completed[0]->messageId);
+        self::assertSame(0, $client->pendingCount());
+    }
+
     private function addr(string $value): Address
     {
         return new Address($value, Smpp::TON_INTERNATIONAL, Smpp::NPI_E164);
+    }
+
+    /**
+     * A deliver_sm body with esm_class=0x04 (ESM_DELIVER_SMSC_RECEIPT) and a
+     * message that does NOT match the delivery-receipt regex, triggering a
+     * SmppInvalidArgumentException in DeliveryReceipt::parseDeliveryReceipt().
+     */
+    private function malformedDeliveryReceiptBody(): string
+    {
+        $sm = 'bad receipt'; // no match for the id:/sub:/dlvrd:/... receipt regex
+        return pack(
+            'a1cca4cca4ccca1a1ccccca' . strlen($sm),
+            '',
+            0, 0, '111',
+            0, 0, '222',
+            0x04,       // esm_class = ESM_DELIVER_SMSC_RECEIPT
+            0,
+            0,
+            '',
+            '',
+            0,
+            0,
+            0,
+            0,
+            strlen($sm),
+            $sm
+        );
     }
 
     private function pdu(int $id, int $status, int $sequence, string $body): string

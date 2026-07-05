@@ -83,8 +83,9 @@ class SplitMessageSlowPathTest extends TestCase
     public function testSlowSplitMultipleChunksWithEscapeAtBoundary(): void
     {
         $chunkSize = 5;
-        // \x1B at index 4 (first boundary) and index 10 (second boundary, i.e.
-        // the 5th char of the second part "\x1BEFGH" which has length 5).
+        // \x1B at index 4 (first boundary) and index 9 (second boundary: it is
+        // the 5th char of the second part "\x1BEFGH", flushed by the size guard
+        // $n == $chunkSize, not by the escape guard).
         $message = "ABCD\x1BEFGH\x1BIJ";
 
         $parts = $this->split($message, $chunkSize);

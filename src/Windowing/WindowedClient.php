@@ -8,6 +8,7 @@ use Closure;
 use Smpp\Client;
 use Smpp\Contracts\Transport\TransportInterface;
 use Smpp\Exceptions\SmppException;
+use Smpp\Exceptions\SocketTransportException;
 use Smpp\Pdu\Address;
 use Smpp\Pdu\DeliveryReceipt;
 use Smpp\Pdu\Pdu;
@@ -22,6 +23,19 @@ use Smpp\Smpp;
  * Client. Call submitAsync() to fire messages (up to the configured window
  * size) and pump() to drain responses, match them by sequence number and
  * surface completed logical messages, timeouts and inbound SMS.
+ *
+ * ## Sync/Windowed Mixing Hazard
+ * Do NOT mix the synchronous API (sendSMS() / sendCommand() / readSMS()) with
+ * the windowed API (submitAsync() / pump()) on the SAME instance while
+ * segments are in flight. The synchronous readPduResponse() call will enqueue
+ * any in-flight submit_sm_resp PDUs it encounters into the internal pduQueue;
+ * pump() does NOT read from that queue, so those groups would never resolve
+ * via a successful match and would only be surfaced via timeout.
+ *
+ * ## Lazy-Window Config Timing
+ * Configure the window (config->setWindowSize() / config->setWindowTimeoutMs())
+ * BEFORE the first submitAsync(), pump(), or canSubmit() call. The InFlightWindow
+ * is built lazily and cached on first use; later config changes are ignored.
  */
 class WindowedClient extends Client
 {
@@ -80,6 +94,10 @@ class WindowedClient extends Client
         int $dataCoding = Smpp::DATA_CODING_DEFAULT,
         int $priority = 0x00
     ): void {
+        if (!$this->transport->isOpen()) {
+            throw new SocketTransportException('Socket is closed');
+        }
+
         if (!$this->isMessageSendable(strlen($message), $dataCoding)) {
             throw new SmppException('Message not sendable with data_coding 0x' . dechex($dataCoding));
         }
@@ -151,7 +169,20 @@ class WindowedClient extends Client
 
                 case Command::DELIVER_SM:
                     // parseSMS() also sends the deliver_sm_resp.
-                    $incoming[] = $this->parseSMS($pdu);
+                    // A malformed PDU (e.g. a delivery-receipt whose text fails
+                    // the format regex) must not abort the whole pump() cycle
+                    // and starve pending response matching or timeout harvesting.
+                    try {
+                        $incoming[] = $this->parseSMS($pdu);
+                    } catch (\Throwable $e) {
+                        $this->logger->warning(
+                            'Skipped malformed deliver_sm: ' . $e->getMessage(),
+                            [
+                                'command_id' => $pdu->getId(),
+                                'sequence'   => $pdu->getSequence(),
+                            ]
+                        );
+                    }
                     break;
 
                 case Command::ENQUIRE_LINK:

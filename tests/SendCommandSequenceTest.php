@@ -59,7 +59,9 @@ class SendCommandSequenceTest extends TestCase
         $property = new ReflectionProperty(Client::class, 'sequenceNumber');
         $property->setAccessible(true);
 
-        return intval($property->getValue($client));
+        /** @var int $value */
+        $value = $property->getValue($client);
+        return intval($value);
     }
 
     private function clientWithResponseStatus(int $status): Client

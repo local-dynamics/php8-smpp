@@ -48,6 +48,7 @@ class DeliveryReceipt extends Sms
             );
         }
 
+        /** @var array<int, string> $matches */
         $this->messageId  = $matches[1];
         $this->sub        = (int)$matches[2];
         $this->dlvrd      = (int)$matches[3];

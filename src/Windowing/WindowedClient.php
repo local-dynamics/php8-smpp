@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Smpp\Windowing;
 
 use Closure;
-use Exception;
 use Smpp\Client;
 use Smpp\Contracts\Transport\TransportInterface;
 use Smpp\Exceptions\SmppException;
@@ -68,7 +67,7 @@ class WindowedClient extends Client
      * All of its segments are accepted atomically.
      *
      * @param Tag[]|null $tags
-     * @throws Exception
+     * @throws SmppException
      */
     public function submitAsync(
         mixed $context,

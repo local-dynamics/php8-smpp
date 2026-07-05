@@ -80,6 +80,28 @@ class WindowedClientSubmitTest extends TestCase
         $client->submitAsync(2, $this->addr('111'), $this->addr('222'), 'b');
     }
 
+    public function testMultipartOverflowIsRejectedAtomically(): void
+    {
+        // str_repeat('a', 400) with default GSM coding splits into 3 segments
+        // (160-char limit per single SMS; 153-char limit per part in multipart).
+        // With a window of 2 that cannot fit all 3 segments, submitAsync() must
+        // throw SmppException WITHOUT writing any PDU or consuming sequence numbers.
+        $transport = new RecordingTransport();
+        $client = new WindowedClient($transport, 'sysid', 'secret');
+        $client->config->setWindowSize(2);
+
+        $message = str_repeat('a', 400); // produces 3 segments → exceeds window of 2
+
+        try {
+            $client->submitAsync(99, $this->addr('111'), $this->addr('222'), $message);
+            self::fail('Expected SmppException was not thrown');
+        } catch (SmppException) {
+            // Atomicity postconditions: no PDUs written, no capacity consumed
+            self::assertEmpty($transport->written, 'No PDU bytes must have been written');
+            self::assertSame(0, $client->pendingCount(), 'No sequence numbers must have been consumed');
+        }
+    }
+
     public function testMultipartMessageIsAcceptedAtomically(): void
     {
         $transport = new RecordingTransport();

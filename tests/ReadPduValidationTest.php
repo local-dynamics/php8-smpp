@@ -50,6 +50,34 @@ class ReadPduValidationTest extends TestCase
     }
 
     /**
+     * A transport that violates the read() contract with a short read (fewer
+     * bytes than requested, but not zero) must not hand a truncated body to
+     * the parser — that desyncs the stream and surfaces later as confusing
+     * "Unexpected end of PDU body" bursts.
+     */
+    public function testReadPduRejectsShortBodyRead(): void
+    {
+        $this->expectException(PDUParseException::class);
+        $this->expectExceptionMessage('Incomplete PDU body: expected 498 bytes but got 107');
+
+        // command_length 514 => body of 498 bytes, but transport delivers only 107
+        $this->invokeReadPdu($this->header(514), str_repeat("\x00", 107));
+    }
+
+    /**
+     * Regression guard: a PDU whose body arrives complete is parsed normally.
+     */
+    public function testReadPduAcceptsCompleteBody(): void
+    {
+        $body = str_repeat("\x2A", 20);
+        $pdu  = $this->invokeReadPdu($this->header(36), $body);
+
+        self::assertInstanceOf(Pdu::class, $pdu);
+        /** @var Pdu $pdu */
+        self::assertSame($body, $pdu->getBody());
+    }
+
+    /**
      * 16-byte header with the given command_length; other fields are fixed.
      */
     private function header(int $commandLength): string
@@ -57,18 +85,19 @@ class ReadPduValidationTest extends TestCase
         return pack('NNNN', $commandLength, Command::ENQUIRE_LINK, 0, 1);
     }
 
-    private function invokeReadPdu(string $header): mixed
+    private function invokeReadPdu(string $header, string $body = ''): mixed
     {
-        $transport = new class($header) implements TransportInterface {
-            public function __construct(private string $header)
+        $transport = new class($header, $body) implements TransportInterface {
+            public function __construct(private string $header, private string $body)
             {
             }
 
             public function read(int $length): string
             {
-                // Always return the header bytes; for these tests the body read
-                // is either never reached (invalid length) or zero-length.
-                return $length === 16 ? $this->header : '';
+                // First (header) read returns the header bytes; any body read
+                // returns the configured body verbatim — possibly shorter than
+                // requested, to simulate a contract-violating short read.
+                return $length === 16 ? $this->header : $this->body;
             }
 
             public function open(): void {}

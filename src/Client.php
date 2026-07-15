@@ -372,6 +372,15 @@ class Client implements SmppClientInterface
             if (strlen($body) === 0) {
                 throw new SmppException('Could not read PDU body');
             }
+            // Defense in depth: a transport that violates the read() contract
+            // ("exact number of bytes") with a short read would hand the parser
+            // a truncated body and leave the remainder in the stream, desyncing
+            // every subsequent PDU. Fail loudly here instead.
+            if (strlen($body) !== $bodyLength) {
+                throw new PDUParseException(
+                    "Incomplete PDU body: expected {$bodyLength} bytes but got " . strlen($body)
+                );
+            }
         }
 
         $this->logger->debug("Read PDU         : {$pduHeader->getCommandLength()} bytes");
